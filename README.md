@@ -14,7 +14,7 @@ To install requirements:
  ```
 
 ## Training
-
+(You need to create the directory './stdout', you can also omit '>stdout/*' so that you can run these commands directly.)
 To train the model(s) in the paper, run those commands:
 
 ```train
