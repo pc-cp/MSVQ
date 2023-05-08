@@ -1,4 +1,4 @@
-# MSVQ: Self-Supervised Learning by Multiple Sample Views and Queues
+# MSVQ: Self-Supervised Learning with Multiple Sample Views and Queues
 
 This repository is the official implementation of [MSVQ: Self-Supervised Learning by Multiple Sample Views and Queues](https://arxiv.org/abs/2030.12345). 
 
