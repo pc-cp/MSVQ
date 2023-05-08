@@ -54,4 +54,4 @@ Our model achieves the following performance:
 > ![figure1](./figures/to_git.png "tsne")
 
 ## Contributors and Contact
->📋  If there are any questions, feel free to contact with the authors: Chen Peng ([1222046103@njupt.edu.cn](<1222046103@njupt.edu.cn>)), Xianzhong Long ([lxz@njupt.edu.cn](<lxz@njupt.edu.cn>)).
+>📋  If there are any questions, feel free to contact with the authors.
