@@ -1,6 +1,6 @@
 # MSVQ: Self-Supervised Learning with Multiple Sample Views and Queues
 
-This is an anonymous submission PyTorch implementation of MSVQ proposed by our paper [MSVQ: Self-Supervised Learning by Multiple Sample Views and Queues]
+This is an anonymous submission PyTorch implementation of MSVQ proposed by our paper [MSVQ: Self-Supervised Learning with Multiple Sample Views and Queues]
 
 > ![figure1](./figures/msvq.png "MSVQ_overview")
 > 
