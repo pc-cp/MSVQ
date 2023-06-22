@@ -2,7 +2,6 @@ import torch.nn as nn
 import network.resnet as resnet
 from functools import partial
 
-
 class ModelBase(nn.Module):
     """
     Common CIFAR ResNet recipe.
@@ -33,8 +32,6 @@ class ModelBase(nn.Module):
     def forward(self, x):
         x = self.net(x)
         return x
-    
-
 
 class SplitBatchNorm(nn.BatchNorm2d):
     def __init__(self, num_features, num_splits, **kw):
@@ -58,8 +55,7 @@ class SplitBatchNorm(nn.BatchNorm2d):
                 input, self.running_mean, self.running_var, 
                 self.weight, self.bias, False, self.momentum, self.eps)
 
-
-class ModelBaseMoCo(nn.Module):
+class ModelBase_ResNet18(nn.Module):
     """
     Common CIFAR ResNet recipe.
     Comparing with ImageNet ResNet recipe, it:
@@ -67,7 +63,7 @@ class ModelBaseMoCo(nn.Module):
     (ii) removes pool1
     """
     def __init__(self, feature_dim=128, arch='', dataset='cifar10', bn_splits=8):
-        super(ModelBaseMoCo, self).__init__()
+        super(ModelBase_ResNet18, self).__init__()
 
         # use split batchnorm
         norm_layer = partial(SplitBatchNorm, num_splits=bn_splits) if bn_splits > 1 else nn.BatchNorm2d
@@ -87,14 +83,12 @@ class ModelBaseMoCo(nn.Module):
                 self.net.append(nn.Flatten(1))
                 continue
             self.net.append(module)
-
         self.net = nn.Sequential(*self.net)
 
     def forward(self, x):
         x = self.net(x)
         # note: not normalized here
         return x
-    
 
 
 

@@ -1,22 +1,20 @@
 from torchvision import datasets, transforms
-from PIL import ImageFilter, Image
+from PIL import ImageFilter, Image, ImageOps
 import numpy as np
 import os
 import sys
 import random
 from torch.utils.data import Dataset
 
+
 class GaussianBlur(object):
     """Gaussian blur augmentation in SimCLR https://arxiv.org/abs/2002.05709"""
-
     def __init__(self, sigma=[.1, 2.]):
         self.sigma = sigma
-
     def __call__(self, x):
         sigma = random.uniform(self.sigma[0], self.sigma[1])
         x = x.filter(ImageFilter.GaussianBlur(radius=sigma))
         return x
-
 class TinyImageNet(Dataset):
     def __init__(self, root, train=True, transform=None):
         self.Train = train
@@ -129,8 +127,7 @@ class TinyImageNet(Dataset):
 
         return sample, tgt
 
-
-class ThreeCrop:
+class FourCrop:
     def __init__(self, strong, weak):
         self.strong = strong
         self.weak = weak
@@ -146,7 +143,6 @@ class ThreeCrop:
 class STL10Pair(datasets.STL10):
     def __init__(self, root, split='train', transform=None, target_transform=None, download=False, weak_aug=None):
         super().__init__(root, split=split, transform=transform, target_transform=target_transform, download=download)
-
         self.weak_aug = weak_aug
 
     def __getitem__(self, index):
@@ -159,7 +155,7 @@ class STL10Pair(datasets.STL10):
 
         if self.transform is not None:
             pos_1 = self.transform(img)
-            
+
             if self.weak_aug is not None:
                 pos_2 = self.weak_aug(img)
                 pos_3 = self.weak_aug(img)
@@ -168,21 +164,19 @@ class STL10Pair(datasets.STL10):
                 pos_2 = self.transform(img)
                 pos_3 = self.transform(img)
                 pos_4 = self.transform(img)
-        return pos_1, pos_2, pos_3, pos_4
+        return ((pos_1, pos_2, pos_3, pos_4), target)
+
 
 class CIFAR10Pair(datasets.CIFAR10):
     def __init__(self, root, train=True, transform=None, target_transform=None, download=False, weak_aug=None):
         super().__init__(root, train=train, transform=transform, target_transform=target_transform, download=download)
-
         self.weak_aug = weak_aug
 
     def __getitem__(self, index):
         img, target = self.data[index], self.targets[index]
         img = Image.fromarray(img)
-
         if self.transform is not None:
             pos_1 = self.transform(img)
-
             if self.weak_aug is not None:
                 pos_2 = self.weak_aug(img)
                 pos_3 = self.weak_aug(img)
@@ -191,12 +185,11 @@ class CIFAR10Pair(datasets.CIFAR10):
                 pos_2 = self.transform(img)
                 pos_3 = self.transform(img)
                 pos_4 = self.transform(img)
-        return pos_1, pos_2, pos_3, pos_4
+        return ((pos_1, pos_2, pos_3, pos_4), target)
 
 class CIFAR100Pair(datasets.CIFAR100):
     def __init__(self, root, train=True, transform=None, target_transform=None, download=False, weak_aug=None):
         super().__init__(root, train=train, transform=transform, target_transform=target_transform, download=download)
-
         self.weak_aug = weak_aug
 
     def __getitem__(self, index):
@@ -204,7 +197,6 @@ class CIFAR100Pair(datasets.CIFAR100):
         img = Image.fromarray(img)
         if self.transform is not None:
             pos_1 = self.transform(img)
-
             if self.weak_aug is not None:
                 pos_2 = self.weak_aug(img)
                 pos_3 = self.weak_aug(img)
@@ -213,8 +205,7 @@ class CIFAR100Pair(datasets.CIFAR100):
                 pos_2 = self.transform(img)
                 pos_3 = self.transform(img)
                 pos_4 = self.transform(img)
-        return pos_1, pos_2, pos_3, pos_4
-
+        return ((pos_1, pos_2, pos_3, pos_4), target)
 
 # pretrain-strong aug
 def get_contrastive_augment(dataset):
@@ -233,9 +224,8 @@ def get_contrastive_augment(dataset):
     else:
         mean = (0.5071, 0.4867, 0.4408)
         std = (0.2675, 0.2565, 0.2761)
-        
     normalize = transforms.Normalize(mean=mean, std=std)
-    
+
     train_transform = transforms.Compose([
         transforms.RandomResizedCrop(size=size, scale=(0.2, 1)),
         transforms.RandomHorizontalFlip(),
@@ -246,6 +236,7 @@ def get_contrastive_augment(dataset):
         normalize,
     ])
     return train_transform
+
 # pretrain-weak aug
 def get_weak_augment(dataset):
     size = 32
@@ -263,7 +254,6 @@ def get_weak_augment(dataset):
     else:
         mean = (0.5071, 0.4867, 0.4408)
         std = (0.2675, 0.2565, 0.2761)
-        
     normalize = transforms.Normalize(mean=mean, std=std)
     train_transform = transforms.Compose([
         transforms.RandomResizedCrop(size=size, scale=(0.2, 1)),
@@ -272,6 +262,7 @@ def get_weak_augment(dataset):
         normalize,
     ])
     return train_transform
+
 # downstream work fine-tune
 def get_train_augment(dataset):
     size = 32
@@ -289,17 +280,15 @@ def get_train_augment(dataset):
     else:
         mean = (0.5071, 0.4867, 0.4408)
         std = (0.2675, 0.2565, 0.2761)
-        
     normalize = transforms.Normalize(mean=mean, std=std)
-    
     train_transform = transforms.Compose([
         transforms.RandomResizedCrop(size=size),
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
         normalize,
     ])
-
     return train_transform
+
 # downstream work evaluation
 def get_test_augment(dataset):
     if dataset == 'cifar10':
@@ -315,7 +304,7 @@ def get_test_augment(dataset):
         mean = (0.5071, 0.4867, 0.4408)
         std = (0.2675, 0.2565, 0.2761)
     normalize = transforms.Normalize(mean=mean, std=std)
-    
+
     # if dataset == 'stl10':
     #     test_transform = transforms.Compose([
     #         transforms.Resize(70),

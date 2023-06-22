@@ -20,8 +20,10 @@ import matplotlib.pyplot as plt
 
 
 parser = argparse.ArgumentParser()
+parser.add_argument('--name', type=str, default='')
 parser.add_argument('--port', type=int, default=23456)
-parser.add_argument('--cos', type=str, default='cos', help='cosine decay mechanism')
+parser.add_argument('--data_path', type=str, default='/mnt/data/dataset', help='path of dataset (default: \'./dataset\')')
+parser.add_argument('--cos', type=str, default='cos', help='cosine decay mechanism for learning rate')
 parser.add_argument('--dataset', type=str, default='cifar10')
 parser.add_argument('--epochs', type=int, default=100)
 parser.add_argument('--batch_size', type=int, default=256)
@@ -84,14 +86,10 @@ def tsne_plot(save_dir, targets, outputs, epoch):
     print('done!')
 
 def main():
-    setup_seed(1338)
-    # args.epochs = 100
-    # args.batch_size = 256
+    setup_seed(1337)
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpuid
-    args.checkpoint = f'msvq-{args.dataset}{args.logdir}.pth'
-    # print(args.checkpoint)
-    # if not os.path.exists(args.save_dir+args.logdir):
-    #     os.makedirs(args.save_dir+args.logdir)
+    args.checkpoint = f'{args.name}-{args.dataset}-{args.logdir}.pth'
+
     print(args)
     if args.cos == 'cos':
         lr = 1
@@ -99,27 +97,23 @@ def main():
         lr = 10
 
     if args.dataset == 'cifar10':
-        train_dataset = datasets.CIFAR10(root='../data', download=True, transform=get_train_augment('cifar10'))
-        test_dataset = datasets.CIFAR10(root='../data', train=False, download=True, transform=get_test_augment('cifar10'))
+        train_dataset = datasets.CIFAR10(root=args.data_path, download=True, transform=get_train_augment('cifar10'))
+        test_dataset = datasets.CIFAR10(root=args.data_path, train=False, download=True, transform=get_test_augment('cifar10'))
         num_classes = 10
     elif args.dataset == 'cifar100':
-        train_dataset = datasets.CIFAR100(root='../data', download=True, transform=get_train_augment('cifar100'))
-        test_dataset = datasets.CIFAR100(root='../data', train=False, download=True, transform=get_test_augment('cifar100'))
+        train_dataset = datasets.CIFAR100(root=args.data_path, download=True, transform=get_train_augment('cifar100'))
+        test_dataset = datasets.CIFAR100(root=args.data_path, train=False, download=True, transform=get_test_augment('cifar100'))
         num_classes = 100
     elif args.dataset == 'tinyimagenet':
-        train_dataset = TinyImageNet(root='../data/tiny-imagenet-200', train=True, transform=get_train_augment('tinyimagenet'))
-        test_dataset = TinyImageNet(root='../data/tiny-imagenet-200', train=False, transform=get_test_augment('tinyimagenet'))
-        # train_dataset = TinyImageNet(root='../data/tiny-imagenet-200/train', transform=get_train_augment('tinyimagenet'))
-        # test_dataset = TinyImageNet(root='../data/tiny-imagenet-200/val', transform=get_test_augment('tinyimagenet'))
+        train_dataset = TinyImageNet(root=args.data_path+'/tiny-imagenet-200', train=True, transform=get_train_augment('tinyimagenet'))
+        test_dataset = TinyImageNet(root=args.data_path+'/tiny-imagenet-200', train=False, transform=get_test_augment('tinyimagenet'))
         num_classes = 200
     else:
-        train_dataset = datasets.STL10(root='../data', download=True, split='train', transform=get_train_augment('stl10'))
-        test_dataset = datasets.STL10(root='../data', download=True, split='test', transform=get_test_augment('stl10'))
+        train_dataset = datasets.STL10(root=args.data_path, download=True, split='train', transform=get_train_augment('stl10'))
+        test_dataset = datasets.STL10(root=args.data_path, download=True, split='test', transform=get_test_augment('stl10'))
         num_classes = 10
 
-    dim_in = 512
     pre_train = ModelBase(dataset=args.dataset)
-
     prefix = 'net.'
 
     state_dict = torch.load('./checkpoints/' + args.checkpoint, map_location='cpu')['model']
@@ -131,13 +125,12 @@ def main():
             state_dict[k[len(prefix):]] = state_dict[k]
             del state_dict[k]
     pre_train.load_state_dict(state_dict)
-    model = LinearHead(pre_train, dim_in=dim_in, num_class=num_classes)
+    model = LinearHead(pre_train, dim_in=512, num_class=num_classes)
     model = model.cuda()
     # model = DistributedDataParallel(model.to(local_rank), device_ids=[local_rank], output_device=local_rank, find_unused_parameters=True)
     optimizer = torch.optim.SGD(model.fc.parameters(), lr=lr, momentum=0.9, weight_decay=0, nesterov=True)
     
     torch.backends.cudnn.benchmark = True
-
 
     # train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
     train_loader = torch.utils.data.DataLoader(
@@ -153,6 +146,7 @@ def main():
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs * train_loader.__len__())
     else:
         scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[60, 80], gamma=0.1)
+
     best_acc = 0
     best_acc5 = 0
 
@@ -225,7 +219,7 @@ def main():
         # if top1_acc > best_acc:
         #     best_acc = top1_acc
         #     if epoch==0 or epoch > 80:
-        #         tsne_plot(args.save_dir+args.logdir, np.concatenate(targets_list, axis=0), np.concatenate(outputs_list, axis=0).astype(np.float64), epoch)
+        #         tsne_plot(args.save_dir, np.concatenate(targets_list, axis=0), np.concatenate(outputs_list, axis=0).astype(np.float64), epoch)
         print(
             'Epoch:{} * Acc@1 {top1_acc:.3f} Acc@5 {top5_acc:.3f} Best_Acc@1 {best_acc:.3f} Best_Acc@5 {best_acc5:.3f}'.format(
                 epoch, top1_acc=top1_acc,

@@ -1,163 +1,93 @@
-import numpy as np
-import torch.nn as nn
-import torch
-from network.base_model import ModelBaseMoCo
+from network.base_model import ModelBase_ResNet18
 from network.head import MoCoHead
 import torch.nn.functional as F
+import copy
+from util.MemoryBankModule import MemoryBankModule
+from util.utils import *
 
 class MSVQ(nn.Module):
-    def __init__(self, dim=128, K=4096, mk=0.99, mp=0.95, tem=0.04, dataset='cifar10', bn_splits=8):
+    def __init__(self, dim=128, K=4096, m1=0.99, m2=0.95, tem=0.05, dataset='cifar10', bn_splits=8, symmetric=False):
         super(MSVQ, self).__init__()
-
         self.K = K
-        self.mk = mk
-        self.mp = mp
+        self.m1 = m1
+        self.m2 = m2
         self.tem = tem
-        # create the encoders
-        self.net       = ModelBaseMoCo(dataset=dataset, bn_splits=bn_splits)
-        self.encoder_k = ModelBaseMoCo(dataset=dataset, bn_splits=bn_splits)
-        self.encoder_p = ModelBaseMoCo(dataset=dataset, bn_splits=bn_splits)
+        self.symmetric = symmetric
+        # create the encoders, [net == f_s]
+        self.net  = ModelBase_ResNet18(dataset=dataset, bn_splits=bn_splits)
+        self.f_t1 = copy.deepcopy(self.net)
+        self.f_t2 = copy.deepcopy(self.net)
 
-        self.head_q = MoCoHead(input_dim=512)
-        self.head_k = MoCoHead(input_dim=512)
-        self.head_p = MoCoHead(input_dim=512)
+        self.g_s  = MoCoHead(input_dim=512, out_dim=dim)
+        self.g_t1 = copy.deepcopy(self.g_s)
+        self.g_t2 = copy.deepcopy(self.g_s)
 
-        for param_q, param_k, param_p in zip(self.net.parameters(), self.encoder_k.parameters(), self.encoder_p.parameters()):
-            param_k.data.copy_(param_q.data)  # initialize
-            param_k.requires_grad = False  # not update by gradient
+        self.queue1 = MemoryBankModule(size=self.K).cuda()
+        self.queue2 = MemoryBankModule(size=self.K).cuda()
 
-            param_p.data.copy_(param_q.data)  # initialize
-            param_p.requires_grad = False  # not update by gradient
+        deactivate_requires_grad(self.f_t1)
+        deactivate_requires_grad(self.f_t2)
+        deactivate_requires_grad(self.g_t1)
+        deactivate_requires_grad(self.g_t2)
+    def contrastive_loss(self, im_1, im_2, im_3, im_4, labels, update=False):
 
-        for param_q, param_k, param_p in zip(self.head_q.parameters(), self.head_k.parameters(), self.head_p.parameters()):
-            param_k.data.copy_(param_q.data)  # initialize
-            param_k.requires_grad = False  # not update by gradient
-
-            param_p.data.copy_(param_q.data)  # initialize
-            param_p.requires_grad = False  # not update by gradient
-
-        # self.max_entropy = np.log(self.K)
-
-        # create the queue
-        self.register_buffer("queue_k", torch.randn(dim, self.K))
-        self.queue_k = nn.functional.normalize(self.queue_k, dim=0)
-
-        self.register_buffer("queue_ptr_k", torch.zeros(1, dtype=torch.long))
-
-        self.register_buffer("queue_p", torch.randn(dim, self.K))
-        self.queue_p = nn.functional.normalize(self.queue_p, dim=0)
-
-        self.register_buffer("queue_ptr_p", torch.zeros(1, dtype=torch.long))
-
-    @torch.no_grad()
-    def _momentum_update_key_encoder(self):
-        """
-        Momentum update of the key encoder
-        """
-        for param_q, param_k, param_p in zip(self.net.parameters(), self.encoder_k.parameters(), self.encoder_p.parameters()):
-            param_k.data = param_k.data * self.mk + param_q.data * (1. - self.mk)
-            param_p.data = param_p.data * self.mp + param_q.data * (1. - self.mp)
-
-        for param_q, param_k, param_p in zip(self.head_q.parameters(), self.head_k.parameters(), self.head_p.parameters()):
-            param_k.data = param_k.data * self.mk + param_q.data * (1. - self.mk)
-            param_p.data = param_p.data * self.mp + param_q.data * (1. - self.mp)
-
-    @torch.no_grad()
-    def _dequeue_and_enqueue(self, keys, p):
-        batch_size = keys.shape[0]
-
-        ptr_k = int(self.queue_ptr_k)
-        assert self.K % batch_size == 0  # for simplicity
-
-        # replace the keys at ptr (dequeue and enqueue)
-        self.queue_k[:, ptr_k:ptr_k + batch_size] = keys.t()  # transpose
-        ptr_k = (ptr_k + batch_size) % self.K  # move pointer
-
-        self.queue_ptr_k[0] = ptr_k
-
-        # batch_size = keys.shape[0]
-
-        ptr_p = int(self.queue_ptr_p)
-        # assert self.K % batch_size == 0  # for simplicity
-
-        # replace the keys at ptr (dequeue and enqueue)
-        self.queue_p[:, ptr_p:ptr_p + batch_size] = p.t()  # transpose
-        ptr_p = (ptr_p + batch_size) % self.K  # move pointer
-
-        self.queue_ptr_p[0] = ptr_p
-
-    @torch.no_grad()
-    def _batch_shuffle_single_gpu(self, x):
-        """
-        Batch shuffle, for making use of BatchNorm.
-        """
-        # random shuffle index
-        idx_shuffle = torch.randperm(x.shape[0]).cuda()
-
-        # index for restoring
-        idx_unshuffle = torch.argsort(idx_shuffle)
-
-        return x[idx_shuffle], idx_unshuffle
-
-    @torch.no_grad()
-    def _batch_unshuffle_single_gpu(self, x, idx_unshuffle):
-        """
-        Undo batch shuffle.
-        """
-        return x[idx_unshuffle]
-
-    def forward(self, im1, im2, im3, im4):
-        """
-        Input:
-            im_q: a batch of query images
-            im_k: a batch of key images
-        Output:
-            loss
-        """        
-
-        # update the key encoder
-        with torch.no_grad():  # no gradient to keys
-            self._momentum_update_key_encoder()
-        
         # compute query features
-        q = self.net(im1)  # queries: NxC
-        q = self.head_q(q)
-        q = nn.functional.normalize(q, dim=1)  # already normalized
+        z_1 = self.g_s(self.net(im_1))  # queries: NxC
 
-        # compute key features
         with torch.no_grad():  # no gradient to keys
-            # shuffle for making use of BN
-            im_k_, idx_unshuffle = self._batch_shuffle_single_gpu(im2)
-
-            k = self.encoder_k(im_k_)  # keys: NxC
-            k = self.head_k(k)
-            k = nn.functional.normalize(k, dim=1)  # already normalized
+            # shuffle
+            im_2_, shuffle = batch_shuffle(im_2)
+            z_2 = self.g_t1(self.f_t1(im_2_))  # keys: NxC
             # undo shuffle
-            k = self._batch_unshuffle_single_gpu(k, idx_unshuffle)
+            z_2 = batch_unshuffle(z_2, shuffle)
 
-            im_p_, idx_unshufflek = self._batch_shuffle_single_gpu(im3)
-            p = self.encoder_p(im_p_)  # keys: NxC
-            p = self.head_p(p)
-            p = nn.functional.normalize(p, dim=1)  # already normalized
-            # # undo shuffle
-            p = self._batch_unshuffle_single_gpu(p, idx_unshufflek)
-
-            im_r_, idx_unshuffle = self._batch_shuffle_single_gpu(im4)
-            r = self.encoder_k(im_r_)  # keys: NxC
-            r = self.head_k(r)
-            r = nn.functional.normalize(r, dim=1)  # already normalized
+            # shuffle
+            im_3_, shuffle = batch_shuffle(im_3)
+            z_3 = self.g_t1(self.f_t1(im_3_))  # keys: NxC
             # undo shuffle
-            r = self._batch_unshuffle_single_gpu(r, idx_unshuffle)
+            z_3 = batch_unshuffle(z_3, shuffle)
 
-        ############MSVQ#################
-        logits_qk = torch.einsum('nc,ck->nk', [q, self.queue_k.clone().detach()])
-        logits_qp = torch.einsum('nc,ck->nk', [q, self.queue_p.clone().detach()])
+            # shuffle
+            im_4_, shuffle = batch_shuffle(im_4)
+            z_4 = self.g_t2(self.f_t2(im_4_))  # keys: NxC
+            # undo shuffle
+            z_4 = batch_unshuffle(z_4, shuffle)
 
-        logits_k = torch.einsum('nc,ck->nk', [k, self.queue_k.clone().detach()])
-        logits_p = torch.einsum('nc,ck->nk', [p, self.queue_p.clone().detach()])
-        logits_r = torch.einsum('nc,ck->nk', [r, self.queue_k.clone().detach()])
-        loss_k = - torch.sum(F.softmax(logits_k.detach() / self.tem, dim=1) * F.log_softmax(logits_qk / 0.1, dim=1), dim=1).mean()
-        loss_p = - torch.sum(F.softmax(logits_p.detach() / self.tem, dim=1) * F.log_softmax(logits_qp / 0.1, dim=1), dim=1).mean()
-        loss_r = - torch.sum(F.softmax(logits_r.detach() / self.tem, dim=1) * F.log_softmax(logits_qk / 0.1, dim=1), dim=1).mean()
-        self._dequeue_and_enqueue(k, p)
-        return (loss_k+loss_p+loss_r)/3
+        # Nearest Neighbour,    queue: [feature_dim, self.K]
+        _, queue_1, _ = self.queue1(output=z_2, labels=labels, update=update)
+        _, queue_2, _ = self.queue1(output=z_4, labels=labels, update=update)
+        # ================normalized==================
+        z_1 = nn.functional.normalize(z_1, dim=1)
+        z_2, z_3, z_4 = nn.functional.normalize(z_2, dim=1), nn.functional.normalize(z_3, dim=1), nn.functional.normalize(z_4, dim=1)
+
+        queue_1, queue_2 = queue_1.t(), queue_2.t()
+        queue_1, queue_2 = nn.functional.normalize(queue_1, dim=1), nn.functional.normalize(queue_2, dim=1)
+
+        # ===========MSVQ=============
+        # calculate similiarities, logits_q_queue has shape (n, self.K), logits_z_k_queue has shape (n, self.K)
+        logits_11 = torch.einsum("nc,mc->nm", z_1, queue_1)
+        logits_12 = torch.einsum("nc,mc->nm", z_1, queue_2)
+
+        logits_21 = torch.einsum("nc,mc->nm", z_2, queue_1)
+        logits_31 = torch.einsum("nc,mc->nm", z_3, queue_1)
+        logits_42 = torch.einsum("nc,mc->nm", z_4, queue_2)
+
+        loss1 = - torch.sum(F.softmax(logits_21.detach() / self.tem, dim=1) * F.log_softmax(logits_11 / torch.tensor(0.1), dim=1), dim=1).mean().cuda()
+        loss2 = - torch.sum(F.softmax(logits_31.detach() / self.tem, dim=1) * F.log_softmax(logits_11 / torch.tensor(0.1), dim=1), dim=1).mean().cuda()
+        loss3 = - torch.sum(F.softmax(logits_42.detach() / self.tem, dim=1) * F.log_softmax(logits_12 / torch.tensor(0.1), dim=1), dim=1).mean().cuda()
+        loss = (loss1+loss2+loss3)/3.0
+
+        return loss
+    def forward(self, im_1, im_2, im_3, im_4, labels):
+        # Updates parameters of `model_ema` with Exponential Moving Average of `model`
+        update_momentum(model=self.net, model_ema=self.f_t1, m=self.m1)
+        update_momentum(model=self.net, model_ema=self.f_t2, m=self.m2)
+
+        update_momentum(model=self.g_s, model_ema=self.g_t1, m=self.m1)
+        update_momentum(model=self.g_s, model_ema=self.g_t2, m=self.m2)
+
+        loss_12 = self.contrastive_loss(im_1, im_2, im_3, im_4, update=True, labels=labels)
+
+        loss = loss_12
+
+        return loss
