@@ -55,7 +55,7 @@ class MSVQ(nn.Module):
 
         # Nearest Neighbour,    queue: [feature_dim, self.K]
         _, queue_1, _ = self.queue1(output=z_2, labels=labels, update=update)
-        _, queue_2, _ = self.queue1(output=z_4, labels=labels, update=update)
+        _, queue_2, _ = self.queue2(output=z_4, labels=labels, update=update)
         # ================normalized==================
         z_1 = nn.functional.normalize(z_1, dim=1)
         z_2, z_3, z_4 = nn.functional.normalize(z_2, dim=1), nn.functional.normalize(z_3, dim=1), nn.functional.normalize(z_4, dim=1)
