@@ -51,6 +51,8 @@ Our model achieves the following performance:
 |----------------|-----------|-----------|-----------|---------------|
 | MoCoV2         | 86.18     | 59.51     | 85.88     | 43.36         |
 | **MSVQ(Ours)** | **91.46** | **66.28** | **90.36** | **48.09**     |
+
+
 ![figure2](./figures/to_git.png "tsne")
 ![figure3](./figures/to_git_knn.png "knn")
 ## Contributors and Contact
