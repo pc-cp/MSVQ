@@ -1,5 +1,9 @@
 # MSVQ: Self-Supervised Learning with Multiple Sample Views and Queues
 
+## Updata(12,Nov, 2023)
+- **<font size=4>MSVQ has been accepted in KBS(Knowledge-Based Systems)!!</font>** Please check out our paper on [arXiv](https://arxiv.org/abs/2305.05370).
+
+
 This is the official Pytorch implementation of the MSVQ [MSVQ: Self-Supervised Learning with Multiple Sample Views and Queues] paper, if you find this useful, feel free to give us a Star 🌟✨.
 
 ![figure1](./figures/msvq.png)
@@ -55,5 +59,24 @@ Our model achieves the following performance:
 
 ![figure2](./figures/to_git.png "tsne")
 ![figure3](./figures/to_git_knn.png "knn")
+
+## Citation
+If you find this repo useful for your research, please consider citing the paper
+
+```
+@article{PENG2024111197,
+title = {MSVQ: Self-supervised learning with multiple sample views and queues},
+journal = {Knowledge-Based Systems},
+volume = {283},
+pages = {111197},
+year = {2024},
+issn = {0950-7051},
+doi = {https://doi.org/10.1016/j.knosys.2023.111197},
+url = {https://www.sciencedirect.com/science/article/pii/S0950705123009474},
+author = {Chen Peng and Xianzhong Long and Yun Li}
+```
+
+
+
 ## Contributors and Contact
 >📋  If there are any questions, feel free to contact with the authors.
